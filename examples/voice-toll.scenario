@@ -1,0 +1,37 @@
+# QoS Fabric worked scenario.
+#
+# Run with:
+#   qosfabric_cli scenario --store <DIR> --file examples/voice-toll.scenario
+#
+# The clock is pinned first so that every freshness window in the scenario is
+# explicit and reproducible. Comments and blank lines are ignored.
+
+now 1800000000000
+
+# A publisher claims a lease. Incarnations must strictly increase, so this is
+# exactly the assertion a restarted agent makes.
+publisher bus-1 1 ttl_ms=600000
+
+# Policy: degradation permitted up to 20 percent, evidence may be one epoch
+# behind, capability declarations must be fresher than ten minutes.
+policy strict 1 degrade=yes relax_ppm=200000 stale_epochs=1 max_age_ms=600000
+
+# Service class: 1 Mbit/s guaranteed, 1.5 ms latency, 200 us jitter, 100 ppm
+# loss, queue isolation, rate-limited treatment, priority rank 3, two disjoint
+# failure domains. Degradation is permitted up to 10 percent, and violations
+# are degraded where possible before being rejected.
+class voice.toll 1 min_rate=1000000 latency=1500 jitter=200 loss=100 isolation=queue-isolated treatment=rate-limited priority=3 disjoint=2 degrade=yes relax_ppm=100000 violation=degrade-then-reject
+
+# Path: two resources in different failure domains with 100 us of fixed
+# overhead contributed by the path itself.
+path p1 1 fixed_latency=100 components=res-1:1:d1:primary,res-2:1:d2:protection
+
+# Resource capability declarations, each bound to the generation the path
+# references.
+capability res-1 1 publisher=bus-1 incarnation=1 state=available rate=2000000 latency=600 jitter=80 loss=20 isolation=queue-isolated treatment=rate-limited priority=4 burst=65536 burst_window=1000 mtu=9000 domain=d1
+capability res-2 1 publisher=bus-1 incarnation=1 state=available rate=1500000 latency=700 jitter=90 loss=30 isolation=queue-isolated treatment=rate-limited priority=4 burst=65536 burst_window=1000 mtu=9000 domain=d2
+
+# Evaluate. Expect SUPPORTED: the guaranteed rate is the weakest link
+# (1.5 Mbit/s), latency is the checked sum plus fixed overhead (1400 us),
+# loss composes to 50 ppm, and both failure domains qualify independently.
+request c1 1 subject=svc-a:1 class=voice.toll:1 path=p1:1 policy=strict:1 priority=gold:1

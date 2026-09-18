@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Summon Software Labs.
+#
+# Normalize line endings in the repository and in every checkout, so that a
+# build on any platform reads exactly the bytes that were reviewed.
+
+* text=auto eol=lf
+*.sln text eol=crlf
+*.vcxproj text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
