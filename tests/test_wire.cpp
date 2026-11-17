@@ -209,3 +209,13 @@ QOS_TEST(registry_status_round_trips) {
   QOS_CHECK_EQ(parsed->capabilities, status.capabilities);
   QOS_CHECK_EQ(parsed->decisions, status.decisions);
 }
+
+QOS_TEST(a_second_listener_cannot_take_a_listening_port) {
+  auto first = listen_loopback(0, 16);
+  QOS_REQUIRE(first.has_value());
+  const auto port = local_port(*first);
+  QOS_REQUIRE(port.has_value());
+  auto second = listen_loopback(*port, 16);
+  // Two coordinators must never share one listening port: the second bind fails.
+  QOS_CHECK(!second.has_value());
+}

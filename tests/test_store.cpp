@@ -4,7 +4,11 @@
 #include "harness.hpp"
 #include "tempdir.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "qosfabric/qosfabric.hpp"
@@ -335,4 +339,46 @@ QOS_TEST(verify_detects_a_damaged_snapshot) {
   auto store = Store::Open(store_options(store_path));
   QOS_CHECK(!store.has_value());
   QOS_CHECK_EQ(store.code(), ErrorCode::Corrupt);
+}
+
+QOS_TEST(snapshot_waits_for_a_reader_of_the_manifest_to_close) {
+  qostest::TempDir directory("store-reader");
+  const std::string store_path = directory.child("s");
+  bool reader_opened = false;
+  bool snapshotted = false;
+  bool appended_after = false;
+  {
+    auto store = Store::Open(store_options(store_path));
+    QOS_REQUIRE(store.has_value());
+    for (int i = 0; i < 5; ++i) {
+      QOS_REQUIRE((*store)->Append(RecordType::PublishPolicy, bytes_of("policy-" + std::to_string(i)))
+                      .has_value());
+    }
+    Store& durable = **store;
+    {
+      // Another tool reading the store (an inspection, a scan) holds the manifest
+      // open while the snapshot is published, and closes it shortly after.
+      std::ifstream reader(std::filesystem::path(store_path) / "MANIFEST.qfm", std::ios::binary);
+      reader_opened = reader.is_open();
+      std::thread writer([&durable, &snapshotted] {
+        snapshotted = durable.WriteSnapshot(bytes_of("snapshot-body")).has_value();
+      });
+      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+      reader.close();
+      writer.join();
+    }
+    appended_after =
+        durable.Append(RecordType::PublishPolicy, bytes_of("after-snapshot")).has_value();
+    QOS_REQUIRE(durable.Close().has_value());
+  }
+  QOS_CHECK(reader_opened);
+  // The snapshot is not lost because a reader had the manifest open for a moment.
+  QOS_CHECK(snapshotted);
+  QOS_CHECK(appended_after);
+  auto reopened = Store::Open(store_options(store_path));
+  QOS_REQUIRE(reopened.has_value());
+  QOS_CHECK((*reopened)->recovery().snapshot_loaded);
+  QOS_CHECK_EQ(std::string((*reopened)->snapshot_bytes().begin(), (*reopened)->snapshot_bytes().end()),
+               std::string("snapshot-body"));
+  QOS_REQUIRE((*reopened)->Close().has_value());
 }
